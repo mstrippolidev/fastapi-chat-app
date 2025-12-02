@@ -10,10 +10,10 @@ MAX_FREE_FILE_SIZE_BYTES = MAX_FREE_FILE_SIZE_MB * 1024 * 1024
 SECRET_KEY=os.environ.get("SECRET_KEY")
 
 # --- AWS Service Names ---
-DYNAMODB_USERS_TABLE = os.environ.get("DYNAMODB_USERS_TABLE", "WebSocketUsers")
-DYNAMODB_SESSIONS_TABLE = os.environ.get("DYNAMODB_SESSIONS_TABLE", "ChatSessions")
-DYNAMODB_MESSAGES_TABLE = os.environ.get("DYNAMODB_MESSAGES_TABLE", "ChatMessages")
-DYNAMODB_FILES_TABLE = os.environ.get("DYNAMODB_FILES_TABLE", "UserFiles")
+DYNAMODB_WEBSOCKETS_USERS_TABLE = 'WebSocketUsers'
+DYNAMODB_USERS_COGNITO_SESSIONS_TABLE = 'UserSessions'
+DYNAMODB_CHATS_TABLE = 'ChatSessions'
+DYNAMODB_MESSAGES_TABLE = "ChatMessages"
 S3_BUCKET_NAME = os.environ.get("S3_BUCKET_NAME", "your-websocket-files-bucket")
 
 # --- Cognito Config ---

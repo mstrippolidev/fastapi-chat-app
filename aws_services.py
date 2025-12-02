@@ -2,12 +2,13 @@
     Keep the logic for the aws sdk (POR REVISAR)
 """
 import uuid
-import aiobotocore
+# import aiobotocore
 from aiobotocore.session import get_session
+from botocore.exceptions import ClientError
 import config
-from typing import Dict, Any
-from auth import User
-from datetime import datetime, timezone
+from typing import Dict, Any, List, Optional
+# from auth import User
+from datetime import datetime, timezone, timedelta
 
 # --- AWS Client Setup ---
 # Use a single session for all AWS clients
@@ -30,7 +31,7 @@ async def get_user_details_from_dynamo(user_id: str) -> Dict[str, Any]:
     """
     try:
         response = await dynamodb_client.get_item(
-            TableName=config.DYNAMODB_USERS_TABLE,
+            TableName=config.DYNAMODB_WEBSOCKETS_USERS_TABLE,
             Key={'user_id': {'S': user_id}}
         )
         item = response.get('Item')
@@ -130,3 +131,238 @@ async def update_chat_session_last_message(chat_id: str, timestamp: str, content
         )
     except Exception as e:
         print(f"Error updating chat session {chat_id}: {e}")
+
+async def save_user_session(session_id:str, access_token: str):
+    """
+        Save the session token to dynamoDB.
+    """
+    try:
+        print('is aws file save_user_session')
+        # make ttl for one hour forward
+        now = datetime.now(timezone.utc)
+        ttl = int((now + timedelta(hours=1)).timestamp())
+        await dynamodb_client.put_item(
+            TableName=config.DYNAMODB_USERS_COGNITO_SESSIONS_TABLE,
+            Item={
+                'session_id': {'S': str(session_id)},
+                'access_token': {'S': str(access_token)},
+                'ttl': {'N': str(ttl)}
+            }
+        )
+    except Exception as e:
+        raise Exception(str(e))
+
+async def get_token_from_session(session_id: str) -> Optional[str]:
+    """Retrieves the access_token given a session_id."""
+    try:
+        response = await dynamodb_client.get_item(
+            TableName=config.DYNAMODB_USERS_COGNITO_SESSIONS_TABLE,
+            Key={'session_id': {'S': str(session_id)}}
+        )
+        item = response.get('Item')
+        if item:
+            return item.get('access_token', {}).get('S')
+        return None
+    except Exception as e:
+        print(f"Error retrieving session: {e}")
+        return None
+    
+async def save_user_profile(user_info: dict):
+    """
+    Saves/Updates user in WebSocketUsers table on login.
+    Ensures 'active_chat_ids' exists.
+    """
+    user_id = user_info.get('sub')
+    username = user_info.get('email', user_info.get('username'))
+    """
+        User info from cognito looks like this:
+         {'at_hash': 'OgwuUN9YJIHaAwS2bUoKWQ', 
+         'sub': '64e8c488-90b1-706d-5bc1-6e3cadb2f5ea', 'email_verified': True, 
+         'iss': 'https://cognito-idp.us-east-1.amazonaws.com/us-east-1_ImQugGgar', 
+         'cognito:username': '64e8c488-90b1-706d-5bc1-6e3cadb2f5ea', 
+         'nonce': 'Bm0TCAt3fJjFROIDCV2X', 'origin_jti': 'eeec3f29-adc0-4475-81e1-3bc577ee85ce', 
+         'aud': '4sgv53ns7fabd3590hrfb4irk7', 'token_use': 'id', 'auth_time': 1764636423, 'exp': 1764640023, 'iat': 1764636423, 
+         'jti': 'ee04fc84-23ce-4362-a2ca-321aeea29b38', 'email': 'test3web@mailinator.com'}
+    """
+    if not user_id:
+        return
+
+    try:
+        # usage of 'SET active_chat_ids = if_not_exists(...)' ensures we don't wipe their chats on re-login
+        await dynamodb_client.update_item(
+            TableName=config.DYNAMODB_WEBSOCKETS_USERS_TABLE,
+            Key={'user_id': {'S': user_id}},
+            UpdateExpression="SET username = :u, active_chat_ids = if_not_exists(active_chat_ids, :empty), is_premium = if_not_exists(is_premium, :false), message_count = if_not_exists(message_count, :zero)",
+            ExpressionAttributeValues={
+                ':u': {'S': username},
+                ':empty': {'L': []},
+                ':false': {'BOOL': False},
+                ':zero': {'N': '0'}
+            }
+        )
+        print(f"User profile updated for {username}")
+    except Exception as e:
+        print(f"Error saving user profile: {e}")
+
+async def get_user_active_chats(user_id: str) -> List[Dict]:
+    """
+    1. Reads 'active_chat_ids' from WebSocketUsers.
+    2. Batch gets details from ChatSessions.
+    """
+    # A. Get List of IDs
+    try:
+        user_resp = await dynamodb_client.get_item(
+            TableName=config.DYNAMODB_WEBSOCKETS_USERS_TABLE,
+            Key={'user_id': {'S': user_id}}
+        )
+        if 'Item' not in user_resp:
+            return []
+            
+        # Extract list of strings: ["id1", "id2"]
+        chat_ids_dynamo = user_resp['Item'].get('active_chat_ids', {}).get('L', [])
+        chat_ids = [c['S'] for c in chat_ids_dynamo]
+        
+        if not chat_ids:
+            return []
+        print('esto fueron los chat_ids', chat_ids)
+        # B. Batch Get Details (Optimization)
+        # We need to construct keys for BatchGetItem
+        keys = [{'chat_id': {'S': cid}} for cid in chat_ids]
+        print('estas son las keys', keys, )
+        # DynamoDB BatchGetItem (max 100 items)
+        batch_resp = await dynamodb_client.batch_get_item(
+            RequestItems={
+                config.DYNAMODB_CHATS_TABLE: {
+                    'Keys': keys,
+                    'ProjectionExpression': 'chat_id, last_message_content, last_message_timestamp, user_ids'
+                }
+            }
+        )
+        
+        items = batch_resp.get('Responses', {}).get(config.DYNAMODB_CHATS_TABLE, [])
+        print('items batch', items)
+        # Format for frontend
+        results = []
+        for item in items:
+            results.append({
+                "chat_id": item['chat_id']['S'],
+                "last_message": item.get('last_message_content', {}).get('S', ''),
+                "timestamp": item.get('last_message_timestamp', {}).get('S', ''),
+                "participants": [u['S'] for u in item.get('user_ids', {}).get('L', [])]
+            })
+            
+        # Sort by timestamp desc
+        results.sort(key=lambda x: x['timestamp'], reverse=True)
+        return results
+
+    except Exception as e:
+        print(f"Error fetching active chats: {e}")
+        return []
+
+async def get_chat_history(chat_id: str, limit: int = 20) -> List[Dict]:
+    """
+    Fetches the last N messages for a chat_id using Query (reversed).
+    """
+    try:
+        response = await dynamodb_client.query(
+            TableName=config.DYNAMODB_MESSAGES_TABLE,
+            KeyConditionExpression="chat_id = :cid",
+            ExpressionAttributeValues={
+                ":cid": {"S": chat_id}
+            },
+            ScanIndexForward=False, # False = Descending order (Newest first)
+            Limit=limit
+        )
+        
+        items = response.get('Items', [])
+        
+        # Convert to cleaner JSON and Reverse back to [Oldest -> Newest] for UI
+        history = []
+        for item in items:
+            history.append({
+                "sender_id": item['sender_id']['S'],
+                "content": item['content']['S'],
+                "type": item.get('message_type', {}).get('S', 'text'),
+                "timestamp": item['timestamp']['S'],
+                "username": item.get('username', {}).get('S', 'Unknown')
+            })
+            
+        return history[::-1] # Reverse list to show chronologically
+
+    except Exception as e:
+        print(f"Error fetching history: {e}")
+        return []
+
+async def check_user_exists(user_id: str) -> bool:
+    """Checks if a user exists in the WebSocketUsers table."""
+    try:
+        response = await dynamodb_client.get_item(
+            TableName=config.DYNAMODB_WEBSOCKETS_USERS_TABLE,
+            Key={'user_id': {'S': user_id}}
+        )
+        return 'Item' in response
+    except Exception as e:
+        print(f"Error checking user existence: {e}")
+        return False
+    
+async def add_chat_to_user_list(user_id: str, chat_id: str):
+    """
+    Adds a chat_id to the user's active_chat_ids list.
+    Uses 'if_not_exists' to handle new users and 'NOT contains' to avoid duplicates.
+    """
+    try:
+        await dynamodb_client.update_item(
+            TableName=config.DYNAMODB_WEBSOCKETS_USERS_TABLE,
+            Key={'user_id': {'S': user_id}},
+            UpdateExpression="SET active_chat_ids = list_append(if_not_exists(active_chat_ids, :empty), :new_chat)",
+            ConditionExpression="NOT contains(active_chat_ids, :chat_id_str)",
+            ExpressionAttributeValues={
+                ':new_chat': {'L': [{'S': chat_id}]},
+                ':empty': {'L': []},
+                ':chat_id_str': {'S': chat_id}
+            }
+        )
+        print(f"Added chat {chat_id} to user {user_id}")
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
+            # This is fine, it means the chat was already in the list
+            pass
+        else:
+            print(f"Error adding chat to user list: {e}")
+
+async def create_new_chat_session(current_user_id: str, target_user_id: str) -> str:
+    """
+    1. Creates the ChatSession item (empty last message).
+    2. Updates both users to include this chat_id.
+    """
+    # 1. Build Chat ID (Sorted)
+    users = sorted([current_user_id, target_user_id])
+    chat_id = f"{users[0]}_{users[1]}"
+    
+    try:
+        # 2. Add to ChatSessions Table
+        # Note: We leave last_message_content/timestamp empty as requested.
+        await dynamodb_client.put_item(
+            TableName=config.DYNAMODB_CHATS_TABLE,
+            Item={
+                'chat_id': {'S': chat_id},
+                'last_message_content': {'S': ''},
+                'last_message_timestamp': {'S': ''},
+                'user_ids': {'L': [{'S': current_user_id}, {'S': target_user_id}]},
+                # We add 'updated_at' so it doesn't break sorting if your UI relies on it, 
+                # but set it to now.
+                'updated_at': {'S': datetime.now(timezone.utc).isoformat()} 
+            }
+        )
+        
+        # 3. Add to Current User's List
+        await add_chat_to_user_list(current_user_id, chat_id)
+        
+        # 4. Add to Target User's List
+        await add_chat_to_user_list(target_user_id, chat_id)
+        
+        return chat_id
+        
+    except Exception as e:
+        print(f"Error creating chat session: {e}")
+        return None

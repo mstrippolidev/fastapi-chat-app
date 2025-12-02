@@ -4,7 +4,7 @@
 import json
 import httpx
 from typing import Optional, Dict, Any
-from fastapi import Depends, Query, WebSocketDisconnect, status, Request, WebSocket
+from fastapi import Request, HTTPException, WebSocketDisconnect, status, Request, WebSocket
 from jose import jwt, jws, exceptions as jose_exceptions
 
 import config
@@ -119,36 +119,42 @@ async def validate_cognito_token(token: str) -> Optional[User]:
 # --- Dependency Injection ---
 
 async def get_current_user(
-    websocket: WebSocket,
-    token: Optional[str] = Query(None)
+    request: Request = None, 
+    websocket: WebSocket = None,
+    # We support both HTTP (request) and WebSocket
 ) -> User:
     """
-    Dependency to validate token.
-    Priority:
-    1. Query Param ?token=... (Testing/Legacy)
-    2. Secure Cookie 'access_token' (Production/Standard)
+    Dependency to validate session_id from cookie against DynamoDB.
     """
+    import aws_services as aws # Import here to avoid circular dependency
     
-    # 1. Try Query Param
-    token_to_validate = token
-    print("Is there a token in query params?", token)
-    # 2. Try Cookie if no query param
-    if not token_to_validate:
-        token_to_validate = websocket.cookies.get("access_token")
-        print('is there a token in cookies?', token_to_validate)
+    cookies = None
+    if websocket:
+        cookies = websocket.cookies
+    elif request:
+        cookies = request.cookies
     
-    if not token_to_validate:
-        print("Auth failed: No token found in Query or Cookies.")
-        raise WebSocketDisconnect(
-            code=status.WS_1008_POLICY_VIOLATION,
-            reason="Missing auth token in query or cookie"
-        )
-        
-    user = await validate_cognito_token(token_to_validate)
-    if user is None:
-        print("Auth failed: Token validation returned None.")
-        raise WebSocketDisconnect(
-            code=status.WS_1008_POLICY_VIOLATION,
-            reason="Invalid authentication token"
-        )
+    # 1. Get Session ID
+    session_id = cookies.get("session_id")
+    if not session_id:
+        print("Auth failed: No 'session_id' cookie.")
+        if websocket:
+            raise WebSocketDisconnect(code=status.WS_1008_POLICY_VIOLATION)
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    # 2. Get Real Token from DynamoDB
+    access_token = await aws.get_token_from_session(session_id)
+    
+    if not access_token:
+        print("Auth failed: Session not found/expired in DynamoDB.")
+        if websocket:
+            raise WebSocketDisconnect(code=status.WS_1008_POLICY_VIOLATION)
+        raise HTTPException(status_code=401, detail="Session expired")
+
+    # 3. Validate Token
+    user = await validate_cognito_token(access_token)
+    if not user:
+        if websocket:
+            raise WebSocketDisconnect(code=status.WS_1008_POLICY_VIOLATION)
+        raise HTTPException(status_code=401, detail="Invalid token")
     return user

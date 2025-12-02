@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 import uvicorn, uuid
 import aiobotocore
 import json, requests
+from pydantic import BaseModel
 # import httpx # NEW: Needed for token exchange
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse,JSONResponse
@@ -98,22 +99,36 @@ async def authorize(request: Request):
         # This function automatically checks request.query_params['state'] 
         # vs request.session['state']. If cookies were lost, this fails.
         token = await oauth.cognito.authorize_access_token(request)
-        user = token.get('userinfo')
+        user_info = token.get('userinfo')
         access_token = token.get('access_token')
-        if user:
-            request.session['user'] = user
-        # 3. Create the redirect response and save access token an secure cookie
+        if not access_token:
+            return HTMLResponse("<h1>Error: No token from Cognito</h1>")
+        if user_info:
+            request.session['user'] = user_info
+        # 3. Create session_id to save in dynanoDB with the access_token from cognito
         session_id = uuid.uuid4()
+        await aws.save_user_session(session_id, access_token)
+        await aws.save_user_profile(user_info)
         response = RedirectResponse(url='/chat')
-        # Optional: If you want to send your access_token through secureCookie
+        # response.set_cookie(
+        #     key="access_token",
+        #     value=access_token,
+        #     httponly=True,             # Prevents JavaScript from reading it (security)
+        #     max_age=3600,              # Expires in 1 hour (matches Cognito default)
+        #     samesite="Lax",
+        #     secure=False               # Set to True if using HTTPS/Production
+        # )
+        # Send the session_id as secure token
         response.set_cookie(
-            key="access_token",
-            value=access_token,
+            key="session_id",
+            value=session_id,
             httponly=True,             # Prevents JavaScript from reading it (security)
             max_age=3600,              # Expires in 1 hour (matches Cognito default)
             samesite="Lax",
             secure=False               # Set to True if using HTTPS/Production
         )
+        # Clean up old cookies if they exist
+        response.delete_cookie("access_token")
         return response
     except Exception as e:
         # Common error: mismatching_state
@@ -225,7 +240,7 @@ async def health_check():
     return {"status": "ok"}
 
 @app.get("/api/me")
-async def get_current_user(request: Request):
+async def get_current_user_endpoint(request: Request):
     """
     API endpoint for the frontend to get user details.
     """
@@ -233,6 +248,49 @@ async def get_current_user(request: Request):
     if not user:
         return JSONResponse(status_code=401, content={"error": "Not authenticated"})
     return user
+
+@app.get("/api/chats")
+async def get_active_chats(user: User = Depends(get_current_user)):
+    """Returns list of active chats for the sidebar."""
+    print( "EN ENDPOINT API CHATSSS!!!",user)
+    chats = await aws.get_user_active_chats(user.user_id)
+    return chats
+
+@app.get("/api/chats/{chat_id}/messages")
+async def get_chat_messages(chat_id: str, user: User = Depends(get_current_user)):
+    """Returns last 20 messages for a room."""
+    print('user in chat history', user)
+    history = await aws.get_chat_history(chat_id)
+    return history
+
+# Define the request body schema
+class CreateChatRequest(BaseModel):
+    recipient_id: str
+
+@app.post("/api/chats")
+async def start_new_chat(
+    request: CreateChatRequest, 
+    user: User = Depends(get_current_user)
+):
+    """
+    Endpoint to start a new chat with a user.
+    """
+    # 1. Validation: Cannot chat with yourself (optional constraint)
+    if request.recipient_id == user.user_id:
+         return JSONResponse(status_code=400, content={"error": "Cannot chat with yourself"})
+
+    # 2. Check if recipient exists in DynamoDB
+    exists = await aws.check_user_exists(request.recipient_id)
+    if not exists:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+    
+    # 3. Create Session & Update Users
+    chat_id = await aws.create_new_chat_session(user.user_id, request.recipient_id)
+    
+    if chat_id:
+        return {"status": "success", "chat_id": chat_id}
+    else:
+        return JSONResponse(status_code=500, content={"error": "Failed to create chat session"})
 
 # --- Main execution ---
 if __name__ == "__main__":

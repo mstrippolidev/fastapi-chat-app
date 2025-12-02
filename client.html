@@ -3,153 +3,219 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chat</title>
+    <title>Chat App</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         .chat-scroll::-webkit-scrollbar { width: 6px; }
         .chat-scroll::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 4px; }
     </style>
 </head>
-<body class="bg-gray-50 h-screen flex flex-col font-sans">
+<body class="bg-gray-100 h-screen flex font-sans">
 
-    <!-- Header -->
-    <header class="bg-white border-b p-4 flex justify-between items-center sticky top-0 z-10">
-        <div class="flex items-center gap-4">
-            <h1 class="text-lg font-bold text-gray-800">Chat</h1>
-            <div id="status-indicator" class="flex items-center gap-2 px-3 py-1 bg-gray-100 rounded-full">
-                <span class="w-2 h-2 rounded-full bg-red-500 transition-colors duration-300"></span>
-                <span class="text-xs font-medium text-gray-500">Connecting...</span>
+    <aside class="w-1/4 bg-white border-r flex flex-col hidden md:flex">
+        <div class="p-4 border-b bg-gray-50">
+            <h2 class="font-bold text-lg text-gray-700">Conversations</h2>
+        </div>
+        <div id="chat-list" class="flex-1 overflow-y-auto p-2 space-y-2">
+            <div class="text-center text-gray-400 text-sm mt-4">Loading chats...</div>
+        </div>
+    </aside>
+
+    <main class="flex-1 flex flex-col">
+        <header class="bg-white border-b p-4 flex justify-between items-center sticky top-0 z-10 shadow-sm">
+            <div class="flex items-center gap-4">
+                <h1 id="current-chat-title" class="text-lg font-bold text-gray-800">Select a Chat</h1>
+                <div id="status-indicator" class="flex items-center gap-2 px-3 py-1 bg-gray-100 rounded-full">
+                    <span class="w-2 h-2 rounded-full bg-red-500"></span>
+                    <span class="text-xs font-medium text-gray-500">Disconnected</span>
+                </div>
             </div>
-        </div>
-        
-        <div class="flex items-center gap-2">
-            <!-- Login Button REMOVED -->
-            <input type="text" id="recipient-id" placeholder="Recipient User ID" class="border p-2 rounded text-sm w-40 focus:ring-2 focus:ring-blue-500 outline-none">
-        </div>
-    </header>
+            
+            <div class="flex items-center gap-2">
+                <input type="text" id="recipient-id" placeholder="Start new chat (User ID)" 
+                       class="border p-2 rounded-full text-sm w-48 focus:ring-2 focus:ring-blue-500 outline-none px-4">
+            </div>
+        </header>
 
-    <!-- Messages / Main Area -->
-    <div id="messages" class="flex-1 p-4 overflow-y-auto chat-scroll space-y-4">
-        <div id="welcome-msg" class="text-center text-gray-400 text-sm mt-10">
-            Connecting to secure server...
-        </div>
-    </div>
+        <div id="messages" class="flex-1 p-4 overflow-y-auto chat-scroll space-y-3 bg-gray-50">
+            </div>
 
-    <!-- Controls -->
-    <div class="bg-white p-4 border-t flex gap-3 items-center sticky bottom-0">
-        <input type="file" id="file-input" class="hidden" onchange="handleFileSelect(this)">
-        <button onclick="uploadFile()" class="bg-gray-100 text-gray-600 p-3 rounded-full hover:bg-gray-200 transition">
-             <!-- Icon -->
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
-        </button>
-        <input type="text" id="message-input" placeholder="Type a message..." class="flex-1 bg-gray-50 border border-gray-200 p-3 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-500" onkeypress="handleEnter(event)">
-        <button onclick="sendMessage()" class="bg-blue-600 text-white p-3 px-6 rounded-full hover:bg-blue-700 font-bold transition">Send</button>
-    </div>
+        <div class="bg-white p-4 border-t flex gap-3 items-center">
+            <input type="file" id="file-input" class="hidden" onchange="handleFileSelect(this)">
+            <button onclick="uploadFile()" class="p-2 text-gray-500 hover:bg-gray-100 rounded-full transition">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
+            </button>
+            <input type="text" id="message-input" placeholder="Type a message..." 
+                   class="flex-1 bg-gray-100 border-0 p-3 rounded-full focus:ring-2 focus:ring-blue-500 outline-none" 
+                   onkeypress="handleEnter(event)">
+            <button onclick="sendMessage()" class="bg-blue-600 text-white px-6 py-2 rounded-full font-semibold hover:bg-blue-700 transition">Send</button>
+        </div>
+    </main>
 
     <script>
         const CONFIG = {
-            // cognitoDomain removed as it's no longer needed here
             wsUrl: "ws://localhost:8000/ws",
             bucketName: "websocket-fastapi-tutorial-1"
         };
 
         let socket = null;
-        let currentUserId = "Me"; 
+        let currentChatId = null;
+        let myUserId = null; // We need to fetch this to align messages correctly
 
-        // Login function REMOVED
+        // 1. Fetch User Info & Chats on Load
+        window.addEventListener('load', async () => {
+            await fetchMe();
+            await loadActiveChats();
+            connectWebSocket();
+        });
 
-        function connectWebSocket() {
-            // No token in URL! Browser sends the cookie automatically.
-            socket = new WebSocket(CONFIG.wsUrl);
+        async function fetchMe() {
+            try {
+                const res = await fetch('/api/me'); // You already had this endpoint
+                if (res.ok) {
+                    const user = await res.json();
+                    myUserId = user.sub; // Or however your user object is structured
+                    console.log("Logged in as:", myUserId);
+                }
+            } catch (e) { console.error("Error fetching me:", e); }
+        }
 
-            socket.onopen = () => {
-                updateStatus(true, "Online");
-                document.getElementById("welcome-msg").classList.add("hidden");
-            };
+        // 2. Load Active Chats (Sidebar)
+        async function loadActiveChats() {
+            try {
+                const res = await fetch('/api/chats');
+                if (!res.ok) return;
+                const chats = await res.json();
+                
+                const listEl = document.getElementById("chat-list");
+                listEl.innerHTML = "";
+                
+                chats.forEach(chat => {
+                    const div = document.createElement("div");
+                    div.className = "p-3 hover:bg-blue-50 cursor-pointer rounded-lg transition border-b border-gray-100";
+                    div.onclick = () => selectChat(chat);
+                    
+                    // Simple logic to show the "Other" person's name
+                    const otherUser = chat.participants.find(p => p !== myUserId) || "Unknown";
+                    
+                    div.innerHTML = `
+                        <div class="font-bold text-gray-800 text-sm truncate">${otherUser}</div>
+                        <div class="text-xs text-gray-500 truncate">${chat.last_message || 'No messages yet'}</div>
+                    `;
+                    listEl.appendChild(div);
+                });
+            } catch (e) { console.error("Error loading chats:", e); }
+        }
+
+        // 3. Select Chat & Load History
+        async function selectChat(chat) {
+            currentChatId = chat.chat_id;
             
+            // Identify other user for UI
+            const otherUser = chat.participants.find(p => p !== myUserId) || "Chat";
+            document.getElementById("current-chat-title").innerText = otherUser;
+            
+            // Update recipient input (so new messages go to right person)
+            // Note: In a real app, you'd send 'chat_id' directly to WS, 
+            // but your current backend expects 'recipient_id'.
+            document.getElementById("recipient-id").value = otherUser; 
+
+            // Clear & Load History
+            document.getElementById("messages").innerHTML = '<div class="text-center text-gray-400 mt-4">Loading history...</div>';
+            
+            try {
+                const res = await fetch(`/api/chats/${chat.chat_id}/messages`);
+                if (res.ok) {
+                    const messages = await res.json();
+                    const msgsDiv = document.getElementById("messages");
+                    msgsDiv.innerHTML = ""; // Clear loader
+                    messages.forEach(msg => displayMessage(msg));
+                }
+            } catch (e) { console.error("History error:", e); }
+        }
+
+        // 4. WebSocket Logic
+        function connectWebSocket() {
+            socket = new WebSocket(CONFIG.wsUrl); // Cookie sent automatically
+            
+            socket.onopen = () => updateStatus(true, "Online");
             socket.onmessage = (event) => {
                 const msg = JSON.parse(event.data);
-                processIncomingMessage(msg);
+                if (msg.type === "file_upload_url") { handleActualUpload(msg); return; }
+                
+                // Only show message if it belongs to current chat (or generic broadcast)
+                // Note: You might want a "notification" badge logic for other chats
+                if (currentChatId && msg.chat_id === currentChatId) {
+                    displayMessage(msg);
+                } else if (!currentChatId) {
+                    // Optional: If no chat selected, maybe show a toast?
+                    console.log("Background message:", msg);
+                }
+                
+                // Refresh sidebar to update "Last Message"
+                loadActiveChats();
             };
-            
-            socket.onclose = (e) => {
-                // Simplified close logic
-                updateStatus(false, "Disconnected");
-                console.log("Connection closed", e.code, e.reason);
-            };
-        }
-
-        function updateStatus(isConnected, msg) {
-            const indicator = document.getElementById("status-indicator");
-            indicator.querySelector("span:last-child").innerText = msg;
-            indicator.querySelector("span:first-child").className = isConnected ? 
-                "w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]" : 
-                "w-2 h-2 rounded-full bg-red-500";
-        }
-
-        // --- Chat & File Logic (Same as before) ---
-        function sendMessage() {
-            const input = document.getElementById("message-input");
-            const recipient = document.getElementById("recipient-id").value;
-            const content = input.value.trim();
-            if (!recipient || !content) return;
-
-            socket.send(JSON.stringify({ type: "chat", recipient_id: recipient, content: content }));
-            input.value = "";
-        }
-
-        function processIncomingMessage(msg) {
-            if (msg.type === "file_upload_url") { handleActualUpload(msg); return; }
-            displayMessage(msg);
+            socket.onclose = () => updateStatus(false, "Disconnected");
         }
 
         function displayMessage(msg) {
             const messagesDiv = document.getElementById("messages");
             const msgEl = document.createElement("div");
-            let align = "items-start";
-            let bubble = "bg-white border border-gray-200 text-gray-800 rounded-tl-none";
             
-            // Since we can't read our own user ID from the cookie in JS,
-            // we rely on the message "sender_id" logic.
-            // Ideally, you add a REST endpoint /users/me to get your own ID.
-            if (msg.sender_id && msg.sender_id === currentUserId) {
-                // For now, this alignment logic might be imperfect without /users/me
-                align = "items-end"; 
-            }
+            // Align based on sender
+            const isMe = (msg.sender_id === myUserId);
+            const align = isMe ? "items-end" : "items-start";
+            const bubble = isMe ? "bg-blue-600 text-white rounded-br-none" : "bg-white border text-gray-800 rounded-bl-none";
             
-            // (Rest of display logic is identical to previous version)
-            // ... 
-             let contentHtml = `<p>${msg.content}</p>`;
-             if (msg.type === "file") {
+            let contentHtml = `<p>${msg.content}</p>`;
+            if (msg.type === "file") {
                 const fileUrl = `https://${CONFIG.bucketName}.s3.amazonaws.com/${msg.s3_key}`;
-                contentHtml = `<a href="${fileUrl}" target="_blank" class="text-blue-600 underline">File: ${msg.filename}</a>`;
-             }
+                const textColor = isMe ? "text-blue-100" : "text-blue-600";
+                contentHtml = `<a href="${fileUrl}" target="_blank" class="${textColor} underline flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path></svg>
+                    ${msg.filename || 'Download File'}
+                </a>`;
+            }
 
             msgEl.className = `flex flex-col ${align}`;
-            msgEl.innerHTML = `<div class="${bubble} p-3 rounded-xl shadow-sm max-w-[80%]">${contentHtml}</div>`;
+            msgEl.innerHTML = `
+                <div class="${bubble} px-4 py-2 rounded-2xl shadow-sm max-w-[80%] text-sm">
+                    ${contentHtml}
+                </div>
+                <span class="text-[10px] text-gray-400 mt-1 mx-1">${msg.username || 'User'}</span>
+            `;
             messagesDiv.appendChild(msgEl);
             messagesDiv.scrollTop = messagesDiv.scrollHeight;
         }
+
+        // Helpers
+        function sendMessage() {
+            const input = document.getElementById("message-input");
+            const recipient = document.getElementById("recipient-id").value;
+            const content = input.value.trim();
+            if (!recipient || !content) return;
+            
+            socket.send(JSON.stringify({ type: "chat", recipient_id: recipient, content: content }));
+            input.value = "";
+        }
+        function handleEnter(e) { if(e.key === 'Enter') sendMessage(); }
+        function updateStatus(connected, text) {
+            const el = document.getElementById("status-indicator");
+            el.querySelector("span:last-child").innerText = text;
+            el.querySelector("span:first-child").className = connected ? "w-2 h-2 rounded-full bg-green-500" : "w-2 h-2 rounded-full bg-red-500";
+        }
         
-        // --- File Upload Logic (Same as before) ---
+        // File Logic placeholders (Reuse your existing ones)
         function uploadFile() { document.getElementById("file-input").click(); }
-        function handleFileSelect(input) {
-             // ... (Previous logic)
-             if (input.files.length > 0) {
-                const currentFile = input.files[0];
-                const recipient = document.getElementById("recipient-id").value;
-                socket.send(JSON.stringify({ type: "file_request", filename: currentFile.name, filesize: currentFile.size }));
-             }
+        function handleFileSelect(input) { 
+            if(input.files.length > 0) {
+                 const f = input.files[0];
+                 const r = document.getElementById("recipient-id").value;
+                 if(!r) return alert("Select a chat first");
+                 socket.send(JSON.stringify({ type: "file_request", filename: f.name, filesize: f.size }));
+            }
         }
-        
-        async function handleActualUpload(msg) {
-             // ... (Previous upload logic)
-             // Note: We need access to 'currentFile' here, ensure it's scoped correctly
-        }
-
-        // Start
-        connectWebSocket();
-
+        async function handleActualUpload(msg) { /* Reuse previous logic */ }
     </script>
 </body>
 </html>
