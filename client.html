@@ -61,7 +61,7 @@
         let socket = null;
         let currentChatId = null;
         let myUserId = null; // We need to fetch this to align messages correctly
-
+        let myUsername = null;
         // 1. Fetch User Info & Chats on Load
         window.addEventListener('load', async () => {
             await fetchMe();
@@ -74,8 +74,9 @@
                 const res = await fetch('/api/me'); // You already had this endpoint
                 if (res.ok) {
                     const user = await res.json();
-                    myUserId = user.sub; // Or however your user object is structured
-                    console.log("Logged in as:", myUserId);
+                    myUserId = user.user_id; // Or however your user object is structured
+                    myUsername = user.username
+                    console.log("Logged in as:", myUserId, myUsername);
                 }
             } catch (e) { console.error("Error fetching me:", e); }
         }
@@ -96,7 +97,7 @@
                     div.onclick = () => selectChat(chat);
                     
                     // Simple logic to show the "Other" person's name
-                    const otherUser = chat.participants.find(p => p !== myUserId) || "Unknown";
+                    const otherUser = chat.participants.find(p => p !== myUsername) || "Unknown";
                     
                     div.innerHTML = `
                         <div class="font-bold text-gray-800 text-sm truncate">${otherUser}</div>
@@ -112,7 +113,7 @@
             currentChatId = chat.chat_id;
             
             // Identify other user for UI
-            const otherUser = chat.participants.find(p => p !== myUserId) || "Chat";
+            const otherUser = chat.participants.find(p => p !== myUsername) || "Chat";
             document.getElementById("current-chat-title").innerText = otherUser;
             
             // Update recipient input (so new messages go to right person)

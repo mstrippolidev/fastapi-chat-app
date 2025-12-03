@@ -54,7 +54,7 @@ async def validate_cognito_token(token: str) -> Optional[User]:
     2. Decodes the JWT and validates its signature, expiration, and issuer.
     3. Extracts claims and returns a User object.
     """
-    
+    import aws_services as aws
     if not token:
         return None
         
@@ -87,23 +87,23 @@ async def validate_cognito_token(token: str) -> Optional[User]:
             audience=config.COGNITO_APP_CLIENT_ID, # Validate audience (Client ID)
             issuer=f"https://cognito-idp.{config.COGNITO_REGION}.amazonaws.com/{config.COGNITO_USER_POOL_ID}" # Validate issuer
         )
-        
         # Extract claims and create User
         user_id = payload.get('sub')
-        # Different Cognito setups use different claims for username
-        username = payload.get('cognito:username', payload.get('username'))
-        
-        # This custom attribute must be in your Cognito token
-        is_premium_claim = payload.get('custom:is_premium', 'false')
-        
-        if not user_id or not username:
+        if not user_id:
              print("Token missing 'sub' or 'username' claim.")
              return None
-
+        # Different Cognito setups use different claims for username
+        exists, user = await aws.check_user_exists(user_id)
+        if not exists:
+            print('user does not exists in dynamoDB')
+            return None
+        # This custom attribute must be in your Cognito token
+        username = user.get('username', {}).get('S')
+        is_premium = user.get('is_premium', {}).get("BOOL", False)
         return User(
             user_id=user_id,
             username=username,
-            is_premium=(is_premium_claim == 'true' or is_premium_claim is True)
+            is_premium=is_premium
         )
         
     except jose_exceptions.ExpiredSignatureError:
@@ -144,7 +144,6 @@ async def get_current_user(
 
     # 2. Get Real Token from DynamoDB
     access_token = await aws.get_token_from_session(session_id)
-    
     if not access_token:
         print("Auth failed: Session not found/expired in DynamoDB.")
         if websocket:

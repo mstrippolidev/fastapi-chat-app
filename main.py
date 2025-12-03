@@ -202,7 +202,6 @@ async def websocket_endpoint(
                 # Note: send_personal_message now just takes a user_id
                 await manager.send_personal_message(json.dumps(err_msg), user.user_id)
                 continue # Skip processing this message
-            
             # Handle the different kind of messages
             valid, msg = await FactoryHandler.get_instance_messages_type_handler(msg_type).handle_message(
                 manager, user, data, aws = aws
@@ -240,26 +239,23 @@ async def health_check():
     return {"status": "ok"}
 
 @app.get("/api/me")
-async def get_current_user_endpoint(request: Request):
+async def get_current_user_endpoint(user: User = Depends(get_current_user)):
     """
     API endpoint for the frontend to get user details.
     """
-    user = request.session.get('user')
     if not user:
         return JSONResponse(status_code=401, content={"error": "Not authenticated"})
-    return user
+    return {'user_id': user.user_id, 'username': user.username, 'is_premium': user.is_premium}
 
 @app.get("/api/chats")
 async def get_active_chats(user: User = Depends(get_current_user)):
     """Returns list of active chats for the sidebar."""
-    print( "EN ENDPOINT API CHATSSS!!!",user)
     chats = await aws.get_user_active_chats(user.user_id)
     return chats
 
 @app.get("/api/chats/{chat_id}/messages")
 async def get_chat_messages(chat_id: str, user: User = Depends(get_current_user)):
     """Returns last 20 messages for a room."""
-    print('user in chat history', user)
     history = await aws.get_chat_history(chat_id)
     return history
 
@@ -280,12 +276,11 @@ async def start_new_chat(
          return JSONResponse(status_code=400, content={"error": "Cannot chat with yourself"})
 
     # 2. Check if recipient exists in DynamoDB
-    exists = await aws.check_user_exists(request.recipient_id)
+    exists, target_user = await aws.check_user_exists(request.recipient_id)
     if not exists:
         return JSONResponse(status_code=404, content={"error": "User not found"})
-    
     # 3. Create Session & Update Users
-    chat_id = await aws.create_new_chat_session(user.user_id, request.recipient_id)
+    chat_id = await aws.create_new_chat_session(user.user_id, request.recipient_id, user.username, target_user.get('username', {}).get('S'))
     
     if chat_id:
         return {"status": "success", "chat_id": chat_id}

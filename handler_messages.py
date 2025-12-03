@@ -22,6 +22,7 @@ class HandlerMessageChat(HandlerMessagesTypeI):
     """
         Concrete class for a normal message chat
     """
+    
     async def handle_message(connection_manager:ConnectionManager, user:User, data:dict, *args, **kwargs):
         """
             Send the message send by user to both users.
@@ -151,11 +152,12 @@ class FactoryHandler:
     """
         factory class
     """
-    @classmethod
+    @staticmethod
     def get_instance_messages_type_handler(message_type:str) -> HandlerMessagesTypeI:
         """
             get the correct instance class to handle the message
         """
+        print('dentro del message type factory',message_type)
         if message_type == "chat":
             return HandlerMessageChat
         if message_type == "file_request":

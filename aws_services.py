@@ -224,11 +224,9 @@ async def get_user_active_chats(user_id: str) -> List[Dict]:
         
         if not chat_ids:
             return []
-        print('esto fueron los chat_ids', chat_ids)
         # B. Batch Get Details (Optimization)
         # We need to construct keys for BatchGetItem
         keys = [{'chat_id': {'S': cid}} for cid in chat_ids]
-        print('estas son las keys', keys, )
         # DynamoDB BatchGetItem (max 100 items)
         batch_resp = await dynamodb_client.batch_get_item(
             RequestItems={
@@ -244,11 +242,13 @@ async def get_user_active_chats(user_id: str) -> List[Dict]:
         # Format for frontend
         results = []
         for item in items:
+            chat_id = item['chat_id']['S']
+            participants = str(chat_id).split('::CHAT::')
             results.append({
                 "chat_id": item['chat_id']['S'],
                 "last_message": item.get('last_message_content', {}).get('S', ''),
                 "timestamp": item.get('last_message_timestamp', {}).get('S', ''),
-                "participants": [u['S'] for u in item.get('user_ids', {}).get('L', [])]
+                "participants": participants
             })
             
         # Sort by timestamp desc
@@ -300,7 +300,11 @@ async def check_user_exists(user_id: str) -> bool:
             TableName=config.DYNAMODB_WEBSOCKETS_USERS_TABLE,
             Key={'user_id': {'S': user_id}}
         )
-        return 'Item' in response
+        exists = 'Item' in response
+        user = None
+        if exists:
+            user = response.get('Item')
+        return (exists, user)
     except Exception as e:
         print(f"Error checking user existence: {e}")
         return False
@@ -330,15 +334,14 @@ async def add_chat_to_user_list(user_id: str, chat_id: str):
         else:
             print(f"Error adding chat to user list: {e}")
 
-async def create_new_chat_session(current_user_id: str, target_user_id: str) -> str:
+async def create_new_chat_session(current_user_id: str, target_user_id: str, current_username:str, target_username:str) -> str:
     """
     1. Creates the ChatSession item (empty last message).
     2. Updates both users to include this chat_id.
     """
     # 1. Build Chat ID (Sorted)
-    users = sorted([current_user_id, target_user_id])
-    chat_id = f"{users[0]}_{users[1]}"
-    
+    users = sorted([current_username, target_username])
+    chat_id = f"{users[0]}::CHAT::{users[1]}"
     try:
         # 2. Add to ChatSessions Table
         # Note: We leave last_message_content/timestamp empty as requested.
