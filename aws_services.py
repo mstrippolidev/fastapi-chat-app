@@ -54,12 +54,12 @@ async def increment_user_message_count(user_id: str):
     """Increments message count in DynamoDB for a non-premium user."""
     try:
         await dynamodb_client.update_item(
-            TableName=config.DYNAMODB_USERS_TABLE,
+            TableName=config.DYNAMODB_WEBSOCKETS_USERS_TABLE,
             Key={'user_id': {'S': user_id}},
             UpdateExpression="SET message_count = if_not_exists(message_count, :zero) + :val",
             ExpressionAttributeValues={":val": {"N": "1"}, ":zero": {"N": "0"}},
         )
-        print(f"Incremented message count for {user_id}")
+        # print(f"Incremented message count for {user_id}")
     except Exception as e:
         print(f"Error incrementing message count: {e}")
 
@@ -114,14 +114,14 @@ async def update_chat_session_last_message(chat_id: str, timestamp: str, content
     if msg_type == "file":
         preview = "File"
     else:
-        preview = content[:50] # Truncate to 50 chars for preview
+        preview = content[:250] # Truncate to 50 chars for preview
 
     try:
         # This uses UpdateItem with 'Upsert' logic:
         # It creates the session item if it doesn't exist,
         # or updates it if it does.
         await dynamodb_client.update_item(
-            TableName=config.DYNAMODB_SESSIONS_TABLE,
+            TableName=config.DYNAMODB_CHATS_TABLE,
             Key={'chat_id': {'S': chat_id}},
             UpdateExpression="SET last_message_timestamp = :ts, last_message_content = :prev",
             ExpressionAttributeValues={
@@ -248,7 +248,8 @@ async def get_user_active_chats(user_id: str) -> List[Dict]:
                 "chat_id": item['chat_id']['S'],
                 "last_message": item.get('last_message_content', {}).get('S', ''),
                 "timestamp": item.get('last_message_timestamp', {}).get('S', ''),
-                "participants": participants
+                "participants_username": participants,
+                'participants_user_ids': [uid['S'] for uid in item.get('user_ids', {}).get('L', [])]
             })
             
         # Sort by timestamp desc

@@ -27,26 +27,27 @@ class HandlerMessageChat(HandlerMessagesTypeI):
         """
             Send the message send by user to both users.
         """
+        print("Dentro del handler chat", data)
         recipient_id = data.get("recipient_id")
+        chat_id = data.get("chat_id")
         content = data.get("content", "")
         aws = kwargs.get('aws')
-        if not recipient_id or not content:
+        if not chat_id or not content:
             err_msg = {"type": "error", "content": "Missing recipient_id or content."}
             await connection_manager.send_personal_message(json.dumps(err_msg), user.user_id)
             return (False, err_msg)
 
         # Create the consistent chat_id (sort IDs alphabetically)
-        users = sorted([user.user_id, recipient_id])
-        chat_id = f"{users[0]}_{users[1]}"
         if aws is None:
             return (False, f"Cannot save data to aws. Missing aws parameter")
         # Save message to historial message
         await aws.save_message_to_dynamo(chat_id, user.user_id, user.username, content, "text")
-        
-        # 2. Update count for free users
+        # Update the count for free users
+        add_count = False
         if not user.is_premium:
             await aws.increment_user_message_count(user.user_id)
-            current_message_count += 1 # Update local count
+            add_count = True
+            #current_message_count += 1 # Update local count
             
         # 3. Send message to recipient (if online) and to self (for UI sync)
         broadcast_msg = {
@@ -61,7 +62,7 @@ class HandlerMessageChat(HandlerMessagesTypeI):
         await connection_manager.send_personal_message(msg_json, user.user_id)
         # Send to recipient
         await connection_manager.send_personal_message(msg_json, recipient_id)
-        return (True, '')
+        return (True, '' if add_count is False else 'incremented')
         
 
 class HandlerFileRequestUpload(HandlerMessagesTypeI):

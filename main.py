@@ -209,6 +209,9 @@ async def websocket_endpoint(
             if not valid:
                 print(msg)
                 continue
+            # Increase the count if the message was successfully sent
+            if msg == 'incremented':
+                current_message_count += 1
 
     except WebSocketDisconnect:
         print(f"User {user.username} disconnected.")

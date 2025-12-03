@@ -34,6 +34,7 @@ class ConnectionManager:
         Returns True if sent, False if user is not connected.
         """
         websocket = self.active_connections.get(user_id)
+        print("ENviando mensage a ", user_id)
         if websocket:
             try:
                 await websocket.send_text(message)
