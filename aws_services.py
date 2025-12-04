@@ -78,6 +78,23 @@ async def create_s3_presigned_url(user_id: str, filename: str) -> Dict[str, str]
         print(f"Error generating presigned URL: {e}")
         return {}
 
+async def generate_presigned_download_url(s3_key: str) -> str:
+    """
+    Generates a pre-signed URL for DOWNLOADING (GET).
+    This allows access to private objects.
+    """
+    if not s3_key: return ""
+    try:
+        url = await s3_client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': config.S3_BUCKET_NAME, 'Key': s3_key},
+            ExpiresIn=3600 # Link valid for 1 hour
+        )
+        return url
+    except Exception as e:
+        print(f"Error generating GET URL: {e}")
+        return ""
+
 async def save_message_to_dynamo(chat_id: str, sender_id: str, username: str, content: str, msg_type: str = "text"):
     """Saves the chat message to DynamoDB for persistence."""
     print(f"Saving message to DynamoDB for chat {chat_id}...")
@@ -238,7 +255,6 @@ async def get_user_active_chats(user_id: str) -> List[Dict]:
         )
         
         items = batch_resp.get('Responses', {}).get(config.DYNAMODB_CHATS_TABLE, [])
-        print('items batch', items)
         # Format for frontend
         results = []
         for item in items:

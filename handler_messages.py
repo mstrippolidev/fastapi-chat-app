@@ -114,7 +114,9 @@ class HandlerShowFile(HandlerMessagesTypeI):
         s3_key = data.get("s3_key")
         filename = data.get("filename")
         recipient_id = data.get("recipient_id")
+        chat_id = data.get("chat_id")
         aws = kwargs.get('aws')
+        print(filename, s3_key, recipient_id, chat_id)
         if aws is None:
             return (False, f"Cannot save data to aws. Missing aws parameter")
 
@@ -122,24 +124,23 @@ class HandlerShowFile(HandlerMessagesTypeI):
             err_msg = {"type": "error", "content": "File confirmation missing s3_key, filename, or recipient_id."}
             await connection_manager.send_personal_message(json.dumps(err_msg), user.user_id)
             return (False, err_msg)
-        
-        # Create the consistent chat_id
-        users = sorted([user.user_id, recipient_id])
-        chat_id = f"{users[0]}_{users[1]}"
-
+        add_count = False
         if not user.is_premium:
             await aws.increment_user_message_count(user.user_id)
-            current_message_count += 1
+            # Aumento el contador de mensajes
+            add_count = True
         
         await aws.save_message_to_dynamo(chat_id, user.user_id, user.username, s3_key, "file")
-        
+        # Generate presigned download URL (optional, could be generated on demand)
+        download_url = await aws.generate_presigned_download_url(s3_key)
         broadcast_msg = {
             "type": "file",
             "sender_id": user.user_id,
             "chat_id": chat_id,
             "username": user.username,
             "filename": filename,
-            "s3_key": s3_key
+            "s3_key": s3_key,
+            "file_url": download_url # Send the valid link
         }
         msg_json = json.dumps(broadcast_msg)
 
@@ -147,7 +148,7 @@ class HandlerShowFile(HandlerMessagesTypeI):
         await connection_manager.send_personal_message(msg_json, recipient_id)
         # Send back to sender
         await connection_manager.send_personal_message(msg_json, user.user_id)
-        return (True, '')
+        return (True, '' if not add_count else 'incremented')
 
 class FactoryHandler:
     """

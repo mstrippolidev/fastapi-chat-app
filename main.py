@@ -198,7 +198,8 @@ async def websocket_endpoint(
                 is_allowed_to_send = True
             
             if not is_allowed_to_send:
-                err_msg = {"type": "error", "content": "You have reached your free message limit."}
+                err_msg = {"type": "error", "content": "You have reached your free message limit.",
+                           "code": "001"}
                 # Note: send_personal_message now just takes a user_id
                 await manager.send_personal_message(json.dumps(err_msg), user.user_id)
                 continue # Skip processing this message

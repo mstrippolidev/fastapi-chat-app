@@ -183,6 +183,14 @@
             socket.onopen = () => updateStatus(true, "Online");
             socket.onmessage = (event) => {
                 const msg = JSON.parse(event.data);
+                if (msg.type === "error") {
+                    alert(msg.content); // Popup error
+                    if (msg.code === "001") {
+                        // Code 001 = Limit Reached -> Disable Input
+                        toggleChatControls(false);
+                    }
+                    return; 
+                }
                 if (msg.type === "file_upload_url") { handleActualUpload(msg); return; }
                 
                 if (currentChatId && msg.chat_id === currentChatId) {
@@ -192,7 +200,10 @@
             };
             socket.onclose = () => updateStatus(false, "Disconnected");
         }
-
+        function isImageFile(filename) {
+            return /\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(filename);
+        }
+        // --- UPDATED DISPLAY LOGIC ---
         function displayMessage(msg) {
             const messagesDiv = document.getElementById("messages");
             const msgEl = document.createElement("div");
@@ -201,20 +212,43 @@
             const align = isMe ? "items-end" : "items-start";
             const bubble = isMe ? "bg-blue-600 text-white rounded-br-none" : "bg-white border text-gray-800 rounded-bl-none";
             
-            let content = `<p>${msg.content}</p>`;
+            let contentHtml = `<p>${msg.content}</p>`;
+            
             if (msg.type === "file") {
-                const url = `https://${CONFIG.bucketName}.s3.amazonaws.com/${msg.content}`; 
-                content = `<a href="${url}" target="_blank" class="underline flex items-center gap-2">
+                const downloadUrl = msg.file_url || "#";
+                // Attempt to find filename from msg, or extract from the S3 key (msg.content)
+                let filename = msg.filename;
+                if (!filename && msg.content) {
+                    filename = msg.content.split('/').pop(); // Extract "uuid-image.jpg" from path
+                }
+                filename = filename || "File";
+
+                // CHECK IF IT IS AN IMAGE
+                if (isImageFile(filename)) {
+                    // Render as IMAGE
+                    contentHtml = `
+                        <div class="flex flex-col gap-1">
+                            <a href="${downloadUrl}" target="_blank" title="Click to view full size">
+                                <img src="${downloadUrl}" alt="${filename}" class="rounded-lg max-w-[200px] max-h-[200px] object-cover border border-white/20">
+                            </a>
+                        </div>
+                    `;
+                } else {
+                    // Render as GENERIC FILE DOWNLOAD
+                    contentHtml = `
+                        <a href="${downloadUrl}" target="_blank" class="underline flex items-center gap-2">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-                            File Download
-                           </a>`;
+                            ${filename}
+                        </a>`;
+                }
             }
 
             msgEl.className = `flex flex-col ${align}`;
             msgEl.innerHTML = `
                 <div class="${bubble} px-4 py-2 rounded-2xl shadow-sm max-w-[80%] text-sm">
-                    ${content}
+                    ${contentHtml}
                 </div>
+                <span class="text-[10px] text-gray-400 mt-1 mx-1">${msg.username || 'User'}</span>
             `;
             messagesDiv.appendChild(msgEl);
             messagesDiv.scrollTop = messagesDiv.scrollHeight;
