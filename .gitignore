@@ -94,3 +94,4 @@ media/
 .DS_Store
 Thumbs.db
 dynamoDB.txt
+*.pem

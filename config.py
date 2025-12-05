@@ -30,3 +30,6 @@ if not all([COGNITO_USER_POOL_ID, COGNITO_REGION, COGNITO_APP_CLIENT_ID]):
 
 COGNITO_JWKS_URL = f"https://cognito-idp.{COGNITO_REGION}.amazonaws.com/{COGNITO_USER_POOL_ID}/.well-known/jwks.json"
 COGNITO_SIGNED_TOKEN = f"https://cognito-idp.{COGNITO_REGION}.amazonaws.com/{COGNITO_USER_POOL_ID}/.well-known/jwks.json"
+
+# REDIS CONFIG
+REDIS_CLUSTER_ENDPOINT = os.environ.get("REDIS_CLUSTER_ENDPOINT", "localhost:6379")

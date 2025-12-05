@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse,JSONResponse
 from contextlib import asynccontextmanager
 from authlib.integrations.starlette_client import OAuth
 from starlette.middleware.sessions import SessionMiddleware
-
+import asyncio
 load_dotenv()
 
 # Import from our new files
@@ -22,6 +22,8 @@ from connection_manager import ConnectionManager
 import aws_services as aws
 from handler_messages import FactoryHandler
 
+# Create a single instance of the ConnectionManager
+manager = ConnectionManager()
 # --- App Lifespan (for managing AWS clients) ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -29,8 +31,6 @@ async def lifespan(app: FastAPI):
     Handles startup and shutdown events.
     This is the place to create and close the real AWS clients.
     """
-    print("Application startup...")
-    
     # This creates the AWS clients when the app starts
     if not config.COGNITO_REGION:
         print("Fatal: COGNITO_REGION not set. AWS clients cannot be initialized.")
@@ -40,16 +40,29 @@ async def lifespan(app: FastAPI):
         aws.s3_client = await aws.aws_client_context('s3', region_name=config.COGNITO_REGION, 
                                                     config=aiobotocore.config.AioConfig(signature_version='s3v4')).__aenter__()
         print("Real AWS clients initialized.")
+    # We verify we can reach the cluster before starting the background listener.
+    redis_is_ready = await manager.check_redis_connection()
     
+    redis_task = None
+    if redis_is_ready:
+        # Only start the background loop if Redis is actually reachable
+        redis_task = asyncio.create_task(manager.subscribe_to_channel())
+    else:
+        print("WARNING: Redis is NOT reachable. Chat will work locally but NOT across containers.")
+
     yield # The application runs here
     
     print("Application shutdown...")
-    # This properly closes the clients when the app shuts down
+    
+    # 4. Cleanup
     if aws.dynamodb_client:
         await aws.dynamodb_client.__aexit__(None, None, None)
     if aws.s3_client:
         await aws.s3_client.__aexit__(None, None, None)
-    print("AWS clients closed.")
+    
+    # Cancel the Redis listener to stop the infinite loop
+    if redis_task:
+        redis_task.cancel()
 
 # Initialize FastAPI app with the lifespan manager
 app = FastAPI(title="WebSocket API with Cognito & AWS", lifespan = lifespan)
@@ -69,10 +82,6 @@ oauth.register(
     }
 )
 
-# Create a single instance of the ConnectionManager
-manager = ConnectionManager()
-
-
 @app.get("/login")
 async def login(request: Request):
     """
@@ -81,7 +90,6 @@ async def login(request: Request):
     """
     # Redirect to cognito user pool login page.
     redirect_uri = request.url_for('authorize')
-    print('login')
     return await oauth.cognito.authorize_redirect(request, redirect_uri)
 
 @app.route('/authorize')
@@ -110,14 +118,6 @@ async def authorize(request: Request):
         await aws.save_user_session(session_id, access_token)
         await aws.save_user_profile(user_info)
         response = RedirectResponse(url='/chat')
-        # response.set_cookie(
-        #     key="access_token",
-        #     value=access_token,
-        #     httponly=True,             # Prevents JavaScript from reading it (security)
-        #     max_age=3600,              # Expires in 1 hour (matches Cognito default)
-        #     samesite="Lax",
-        #     secure=False               # Set to True if using HTTPS/Production
-        # )
         # Send the session_id as secure token
         response.set_cookie(
             key="session_id",
@@ -146,11 +146,6 @@ async def get_chat_interface(request: Request, response: Response, code: str = N
     if not user:
         # If not logged in, force them back to login
         return RedirectResponse(url='/login')
-
-    print(f"Serving chat to: {user.get('email')}")
-    
-    # Render the HTML
-    
     return HTMLResponse(content=read_client_html())
 
 def read_client_html():
@@ -170,27 +165,22 @@ async def websocket_endpoint(
     Main WebSocket endpoint. A user connects here
     Token is passed as a query parameter: ?token=...
     """
-    print("inside websocket endpoint")
     # Get the user's latest details from our database
-    # The Cognito token says *who* they are, DynamoDB says *what* their status is.
     db_user_details = await aws.get_user_details_from_dynamo(user.user_id)
-    print(db_user_details)
     # Update user object with DB-level premium status (the source of truth)
     user.is_premium = db_user_details.get("is_premium", False)
     current_message_count = db_user_details.get("message_count", 0)
     
     # Register the user's single connection
     await manager.connect(websocket, user.user_id)
-    print('conectando...')
     try:
         while True:
             # Wait for a message from the client
             data_str = await websocket.receive_text()
-            data = json.loads(data_str)
-            
+            data = json.loads(data_str)        
             msg_type = data.get("type")
             
-            # --- Check Permissions ---
+            # see if it's premium user and is allowed to send messages
             is_allowed_to_send = False
             if user.is_premium:
                 is_allowed_to_send = True
@@ -227,13 +217,10 @@ async def websocket_endpoint(
 @app.get("/logout")
 async def logout(request: Request):
     request.session.clear()
-    
-    # 2. Create a redirect response
+    # Create a redirect response
     response = RedirectResponse(url='/login')
-    
-    # 3. Delete the access_token cookie
-    response.delete_cookie("access_token")
-    
+    # Delete the session_id cookie
+    response.delete_cookie("session_id")
     return response
 
 # --- Health Check Endpoint ---
