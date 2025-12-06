@@ -92,6 +92,10 @@ async def login(request: Request):
     redirect_uri = request.url_for('authorize')
     return await oauth.cognito.authorize_redirect(request, redirect_uri)
 
+@app.get('/')
+async def root():
+    return RedirectResponse(url='/login')
+
 @app.route('/authorize')
 async def authorize(request: Request):
     """
