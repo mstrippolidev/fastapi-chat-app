@@ -121,10 +121,10 @@ async def authorize(request: Request):
         # Send the session_id as secure token
         response.set_cookie(
             key="session_id",
-            value=session_id,
+            value=str(session_id),
             httponly=True,             # Prevents JavaScript from reading it (security)
             max_age=3600,              # Expires in 1 hour (matches Cognito default)
-            samesite="Lax",
+            samesite="None",
             secure=True # False when testing on localhost
         )
         # Clean up old cookies if they exist
@@ -165,6 +165,7 @@ async def websocket_endpoint(
     Main WebSocket endpoint. A user connects here
     Token is passed as a query parameter: ?token=...
     """
+    print('inside websocket endpoint')
     # Get the user's latest details from our database
     db_user_details = await aws.get_user_details_from_dynamo(user.user_id)
     # Update user object with DB-level premium status (the source of truth)

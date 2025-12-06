@@ -133,7 +133,7 @@ async def get_current_user(
         cookies = websocket.cookies
     elif request:
         cookies = request.cookies
-    
+    print('insid eget current user')
     # 1. Get Session ID
     session_id = cookies.get("session_id")
     if not session_id:
@@ -142,7 +142,7 @@ async def get_current_user(
             raise WebSocketDisconnect(code=status.WS_1008_POLICY_VIOLATION)
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    # 2. Get Real Token from DynamoDB
+    print('before get token from dyanomdb session')
     access_token = await aws.get_token_from_session(session_id)
     if not access_token:
         print("Auth failed: Session not found/expired in DynamoDB.")
