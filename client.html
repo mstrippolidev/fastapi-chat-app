@@ -71,8 +71,10 @@
     </main>
 
     <script>
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const host = window.location.host;
         const CONFIG = {
-            wsUrl: "ws://localhost:8000/ws",
+            wsUrl: `${protocol}//${host}/ws`,
             bucketName: "websocket-fastapi-tutorial-1"
         };
 
