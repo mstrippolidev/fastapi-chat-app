@@ -125,7 +125,7 @@ async def authorize(request: Request):
             httponly=True,             # Prevents JavaScript from reading it (security)
             max_age=3600,              # Expires in 1 hour (matches Cognito default)
             samesite="Lax",
-            secure=False               # Set to True if using HTTPS/Production
+            secure=True # False when testing on localhost
         )
         # Clean up old cookies if they exist
         response.delete_cookie("access_token")
