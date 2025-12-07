@@ -1,6 +1,29 @@
 # Cloud-Native Real-Time Chat Application
 
-A high-performance, scalable WebSocket chat application built with **FastAPI** (Python) and deployed on **AWS ECS Fargate**. This project demonstrates a modern "Cloud-Native" architecture, utilizing serverless databases, managed authentication, and container orchestration to handle real-time communication at scale.
+A high-performance, scalable WebSocket chat application built with **FastAPI** (Python) and deployed on **AWS ECS Fargate**.
+
+This project serves as a comprehensive reference architecture for building modern, "Cloud-Native" real-time systems. It moves beyond simple monoliths by utilizing a fully serverless and managed AWS stack to handle authentication, persistence, container orchestration, and multi-node synchronization at scale.
+
+## ☁️ Tech Stack & AWS Services
+This application leverages the full power of the AWS ecosystem. Here is how each service is utilized:
+
+### ⚡ Compute & Networking
+* **Amazon ECS (Fargate)**: Runs the application containers without managing servers (Serverless compute).
+* **Application Load Balancer (ALB)**: Distributes WebSocket traffic, handles SSL termination, and routes requests to healthy containers.
+
+### 💾 Data & Storage
+* **Amazon DynamoDB**: A serverless NoSQL database used for storing user profiles, chat session metadata, and message history with single-digit millisecond latency.
+* **Amazon ElastiCache (Redis)**: Enables **horizontal scaling**. Acts as a Pub/Sub message broker to synchronize WebSocket messages across different Fargate containers.
+* **Amazon S3**: Secure object storage for uploading and serving chat images/files via Presigned URLs.
+
+### 🔐 Security & Identity
+* **Amazon Cognito**: Manages user sign-up, sign-in, and OAuth2 authentication flows.
+* **AWS IAM**: Implements "Least Privilege" access control with granular roles for Task Execution (Infrastructure) and Task Roles (Application Logic).
+* **AWS Systems Manager (SSM) Parameter Store**: Securely manages environment variables and secrets (like DB keys and client secrets) without hardcoding them.
+
+### 🛠️ DevOps & CI/CD
+* **AWS CodeBuild**: Automates the compilation of the Docker image from the source code.
+* **Amazon ECR**: A private registry that stores the Docker images built by CodeBuild, ready for deployment to ECS.
 
 ## Table of Contents
 - [Overview](#-overview)
