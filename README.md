@@ -1,8 +1,8 @@
-# 🚀 Cloud-Native Real-Time Chat Application
+# Cloud-Native Real-Time Chat Application
 
 A high-performance, scalable WebSocket chat application built with **FastAPI** (Python) and deployed on **AWS ECS Fargate**. This project demonstrates a modern "Cloud-Native" architecture, utilizing serverless databases, managed authentication, and container orchestration to handle real-time communication at scale.
 
-## 📋 Table of Contents
+## Table of Contents
 - [Overview](#-overview)
 - [Key Features](#-key-features)
 - [Architecture & Tech Stack](#-architecture--tech-stack)
@@ -13,6 +13,7 @@ A high-performance, scalable WebSocket chat application built with **FastAPI** (
   - [Deployment (ECS + ALB)](#deployment-ecs--alb)
   - [CI/CD Pipeline](#cicd-pipeline)
   - [Security & IAM](#security--iam)
+- [Prerequisites (AWS Setup)](#-prerequisites-aws-setup)
 - [Configuration](#-configuration)
 - [Installation & Local Dev](#-installation--local-dev)
 
@@ -34,15 +35,15 @@ This application allows users to chat in real-time, share files, and manage thei
 ## 🏗 Architecture & Tech Stack
 
 ### Why FastAPI?
-We chose **FastAPI** over Django or Flask for its native support for asynchronous programming (`async/await`). WebSockets require high-concurrency handling; FastAPI's underlying ASGI server (Uvicorn) handles thousands of concurrent connections efficiently with minimal overhead, making it the ideal choice for a Python-based real-time service.
+I chose **FastAPI** over Django or Flask for its native support for asynchronous programming (`async/await`). WebSockets require high-concurrency handling; FastAPI's underlying ASGI server (Uvicorn) handles thousands of concurrent connections efficiently with minimal overhead, making it the ideal choice for a Python-based real-time service.
 
 ### Real-Time State Management (Redis)
 In an ECS Fargate environment, containers are ephemeral. A user connected to `Container A` cannot directly speak to a user on `Container B`.
 * **Solution**: **Amazon ElastiCache (Redis)**.
-* **Strategy**: We use a Pub/Sub mechanism. When a user sends a message, if the recipient is not on the *current* container, the message is published to a Redis channel. All containers listen to this channel and route the message to the correct connected client.
+* **Strategy**: I use a Pub/Sub mechanism. When a user sends a message, if the recipient is not on the *current* container, the message is published to a Redis channel. All containers listen to this channel and route the message to the correct connected client.
 
 ### Database Schema (DynamoDB)
-We use **Amazon DynamoDB** for its single-digit millisecond latency and serverless scaling. The data model uses **4 Tables** designed for access patterns:
+I use **Amazon DynamoDB** for its single-digit millisecond latency and serverless scaling. The data model uses **4 Tables** designed for access patterns:
 
 #### 1. `WebSocketUsers` (Profiles & Limits)
 * **PK**: `user_id` (String)
@@ -82,13 +83,12 @@ We use **Amazon DynamoDB** for its single-digit millisecond latency and serverle
 ### Deployment (ECS + ALB)
 The application runs on **Amazon ECS (Elastic Container Service)** with the **Fargate** launch type (serverless containers).
 * **Load Balancer**: An **Application Load Balancer (ALB)** sits in front of the ECS tasks. It terminates HTTPS (SSL) and forwards traffic to the containers.
-* **Sticky Sessions**: Not required due to the Redis architecture, making scaling seamless.
 * **Domain & SSL**:
     * Domain managed via **Route 53**.
     * SSL Certificate provided by **AWS Certificate Manager (ACM)** attached to the ALB listener (Port 443).
 
 ### CI/CD Pipeline
-We use **AWS CodeBuild** to automate the build process.
+I use **AWS CodeBuild** to automate the build process.
 * **Source**: GitHub Repository.
 * **Build**: Docker image creation via `buildspec.yml`.
 * **Artifact**: Image pushed to **Amazon ECR** (Elastic Container Registry).
@@ -99,7 +99,7 @@ We use **AWS CodeBuild** to automate the build process.
 3.  **Post-build**: `docker push ...`
 
 ### Security & IAM
-We strictly follow the principle of least privilege using two distinct IAM roles:
+I strictly follow the principle of least privilege using two distinct IAM roles:
 
 1.  **Task Execution Role** (The "Mover"):
     * Permissions: Pull images from ECR, write logs to CloudWatch, and read **SSM Parameter Store** (for env vars).
@@ -112,6 +112,20 @@ We strictly follow the principle of least privilege using two distinct IAM roles
 * **CORS** is configured on the bucket to allow the browser to fetch images directly.
 
 ---
+
+## 🛑 Prerequisites (AWS Setup)
+Before running the application locally, you must manually provision these resources in AWS as the local app connects to them directly:
+
+1.  **DynamoDB Tables**: Create the 4 tables (`WebSocketUsers`, `ChatSessions`, `ChatMessages`, `UserSessions`) with the correct Partition Keys.
+2.  **Amazon Cognito**:
+    * Create a User Pool and App Client.
+    * Whitelist `http://localhost:8000/authorize` in the "Allowed Callback URLs".
+3.  **Amazon S3**:
+    * Create a bucket and enable **CORS** to allow `localhost`.
+4.  **Redis**:
+    * Install Redis locally on your machine (or use a cloud instance if reachable).
+---
+
 
 ## 🔧 Configuration
 
@@ -134,30 +148,63 @@ The application is configured using **AWS Systems Manager (SSM) Parameter Store*
 
 ## 💻 Installation & Local Dev
 
-1.  **Clone the repo**
-    ```bash
-    git clone [https://github.com/yourusername/fastapi-chat.git](https://github.com/yourusername/fastapi-chat.git)
-    cd fastapi-chat
+This project runs directly on Python for local development (no Docker required for the app server).
+
+### 1. Prerequisites (AWS Setup)
+Before running the application locally, you must manually provision these resources in AWS as the local app connects to them directly:
+
+1.  **DynamoDB Tables**: Create the 4 tables (`WebSocketUsers`, `ChatSessions`, `ChatMessages`, `UserSessions`) with the correct Partition Keys.
+2.  **Amazon Cognito**:
+    * Create a User Pool and App Client.
+    * Whitelist `http://localhost:8000/authorize` in the "Allowed Callback URLs".
+3.  **Amazon S3**:
+    * Create a bucket and enable **CORS** to allow `localhost`.
+4.  **Redis**:
+    * Install Redis locally on your machine (or use a cloud instance if reachable).
+
+### 2. Installation
+Clone the repo and set up your Python environment:
+
+```bash
+git clone [https://github.com/yourusername/fastapi-chat.git](https://github.com/yourusername/fastapi-chat.git)
+cd fastapi-chat
+
+# Create Virtual Environment
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+
+# Install Dependencies
+pip install -r requirements.txt
+```
+
+### 3. Manual Code Adjustments for Localhost
+Since local development runs on `HTTP` (not HTTPS) and `localhost`, you must manually update a few security settings in the code before running:
+
+1.  **Disable Secure Cookies (`main.py`)**:
+    Locate the `/authorize` route. You must change `secure=True` to `False` so the browser accepts the cookie over HTTP.
+    ```python
+    response.set_cookie(
+        key="session_id",
+        value=str(session_id),
+        httponly=True,
+        max_age=3600,
+        samesite="Lax", # Change to 'Lax' for local testing
+        secure=False    # <--- CRITICAL: Change to False for localhost
+    )
     ```
 
-2.  **Setup Virtual Environment**
-    ```bash
-    python -m venv venv
-    source venv/bin/activate  # or venv\Scripts\activate on Windows
-    pip install -r requirements.txt
+2.  **Update Client Config (`client.html`)**:
+    Open `client.html` and manually verify or update the `CONFIG` object to match your local setup if the dynamic script doesn't detect it correctly.
+    ```javascript
+    const CONFIG = {
+        wsUrl: "ws://localhost:8000/ws", // Ensure this uses ws:// not wss://
+        bucketName: "your-actual-s3-bucket-name"
+    };
     ```
 
-3.  **Set Environment Variables**
-    Create a `.env` file based on the table above.
+### 5. Run the Server
+Start the application using the entry point script:
 
-4.  **Run with Docker (Recommended for Redis)**
-    ```bash
-    docker-compose up --build
-    ```
-
-5.  **Run Manually**
-    Ensure you have a local Redis running or a tunnel to AWS.
-    ```bash
-    uvicorn main:app --reload
-    ```
-    Visit `http://localhost:8000` to start chatting!
+```bash
+python main.py
+```
