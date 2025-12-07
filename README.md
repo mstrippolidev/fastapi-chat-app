@@ -189,9 +189,6 @@ Before running the application locally, you must manually provision these resour
 Clone the repo and set up your Python environment:
 
 ```bash
-git clone [https://github.com/yourusername/fastapi-chat.git](https://github.com/yourusername/fastapi-chat.git)
-cd fastapi-chat
-
 # Create Virtual Environment
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
