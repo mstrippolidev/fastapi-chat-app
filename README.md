@@ -4,6 +4,9 @@ A high-performance, scalable WebSocket chat application built with **FastAPI** (
 
 This project serves as a comprehensive reference architecture for building modern, "Cloud-Native" real-time systems. It moves beyond simple monoliths by utilizing a fully serverless and managed AWS stack to handle authentication, persistence, container orchestration, and multi-node synchronization at scale.
 
+<img width="1200" height="800" alt="Code_Generated_Image" src="https://github.com/user-attachments/assets/18d5bb7d-0746-41b4-b3d7-2ef0d21a23a8" />
+
+
 ## ☁️ Tech Stack & AWS Services
 This application leverages the full power of the AWS ecosystem. Here is how each service is utilized:
 
