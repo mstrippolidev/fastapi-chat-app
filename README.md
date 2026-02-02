@@ -28,6 +28,15 @@ This application leverages the full power of the AWS ecosystem. Here is how each
 * **AWS CodeBuild**: Automates the compilation of the Docker image from the source code.
 * **Amazon ECR**: A private registry that stores the Docker images built by CodeBuild, ready for deployment to ECS.
 
+### 🏗️ Production Architecture Highlights
+* **Scalable WebSockets**: Utilizes Redis Pub/Sub to synchronize chat states across multiple ECS (Fargate) tasks, ensuring that users can communicate regardless of which container instance they are connected to.
+
+* **Secure Authentication**: Integrated AWS Cognito for robust user identity management and JWT-based authentication.
+
+* **Persistent Storage**: DynamoDB provides a high-performance, NoSQL backend for message history and user metadata.
+
+* **CI/CD Pipeline**: Fully automated deployments using AWS CodeBuild and S3, triggered by GitHub commits.
+
 ## Table of Contents
 - [Overview](#-overview)
 - [Key Features](#-key-features)
