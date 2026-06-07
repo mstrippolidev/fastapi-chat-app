@@ -5,6 +5,7 @@ import json
 from abc import ABCMeta, abstractmethod
 from auth import User
 from connection_manager import ConnectionManager
+from custom_exceptions import ChatSessionNotFoundError, UserChatNotAllowedError
 import config
 
 class HandlerMessagesTypeI(metaclass = ABCMeta):
@@ -40,6 +41,13 @@ class HandlerMessageChat(HandlerMessagesTypeI):
         # Create the consistent chat_id (sort IDs alphabetically)
         if aws is None:
             return (False, f"Cannot save data to aws. Missing aws parameter")
+        
+        try:
+            await aws.user_is_allowed_to_chat(chat_id, user.user_id)
+        except (ChatSessionNotFoundError, UserChatNotAllowedError) as e:
+            err_msg = {"type": "error", "content": str(e)}
+            await connection_manager.send_personal_message(json.dumps(err_msg), user.user_id)
+            return (False, str(e))
         # Save message to historial message
         await aws.save_message_to_dynamo(chat_id, user.user_id, user.username, content, "text")
         # Update the count for free users
@@ -124,6 +132,14 @@ class HandlerShowFile(HandlerMessagesTypeI):
             err_msg = {"type": "error", "content": "File confirmation missing s3_key, filename, or recipient_id."}
             await connection_manager.send_personal_message(json.dumps(err_msg), user.user_id)
             return (False, err_msg)
+
+        try:
+            await aws.user_is_allowed_to_chat(chat_id, user.user_id)
+        except (ChatSessionNotFoundError, UserChatNotAllowedError) as e:
+            err_msg = {"type": "error", "content": str(e)}
+            await connection_manager.send_personal_message(json.dumps(err_msg), user.user_id)
+            return (False, str(e))
+
         add_count = False
         if not user.is_premium:
             await aws.increment_user_message_count(user.user_id)

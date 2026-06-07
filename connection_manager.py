@@ -58,10 +58,18 @@ class ConnectionManager:
         """
         Background task: Begin listening to Redis pub/sub channel for broadcast messages.
         """
-        await self.pubsub.subscribe("chat_broadcast")
-        async for message in self.pubsub.listen():
-            if message["type"] == "message":
-                await self.handle_redis_message(message["data"])
+        initial = 2
+        while True:
+            try:
+                await self.pubsub.subscribe("chat_broadcast")
+                async for message in self.pubsub.listen():
+                    if message["type"] == "message":
+                        await self.handle_redis_message(message["data"])
+                initial = 2
+            except Exception as e:
+                print(f"Redis pub/sub disconnected: {e}. Retrying in {initial:.1f}s...")
+                await asyncio.sleep(initial)
+                initial = min(initial * 1.5, 60)
 
     async def handle_redis_message(self, raw_data: str):
         """

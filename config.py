@@ -7,7 +7,9 @@ import os
 MAX_FREE_MESSAGES = 50
 MAX_FREE_FILE_SIZE_MB = 2
 MAX_FREE_FILE_SIZE_BYTES = MAX_FREE_FILE_SIZE_MB * 1024 * 1024
-SECRET_KEY=os.environ.get("SECRET_KEY")
+SECRET_KEY = os.environ.get("SECRET_KEY")
+if not SECRET_KEY:
+    raise ValueError("SECRET_KEY environment variable must be set before starting the application.")
 
 # --- AWS Service Names ---
 DYNAMODB_WEBSOCKETS_USERS_TABLE = 'WebSocketUsers'
@@ -32,4 +34,4 @@ COGNITO_JWKS_URL = f"https://cognito-idp.{COGNITO_REGION}.amazonaws.com/{COGNITO
 COGNITO_SIGNED_TOKEN = f"https://cognito-idp.{COGNITO_REGION}.amazonaws.com/{COGNITO_USER_POOL_ID}/.well-known/jwks.json"
 
 # REDIS CONFIG
-REDIS_CLUSTER_ENDPOINT = os.environ.get("REDIS_CLUSTER_ENDPOINT", "localhost:6379")
+REDIS_CLUSTER_ENDPOINT = os.environ.get("REDIS_CLUSTER_ENDPOINT", "redis://localhost:6379")

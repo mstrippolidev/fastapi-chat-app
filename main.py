@@ -66,7 +66,8 @@ async def lifespan(app: FastAPI):
 
 # Initialize FastAPI app with the lifespan manager
 app = FastAPI(title="WebSocket API with Cognito & AWS", lifespan = lifespan)
-
+if config.SECRET_KEY is None:
+    raise Exception("MISSING SECRET_KEY!!!!")
 app.add_middleware(SessionMiddleware, secret_key=config.SECRET_KEY)
 
 oauth = OAuth()

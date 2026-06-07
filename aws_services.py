@@ -3,12 +3,16 @@
 """
 import uuid
 # import aiobotocore
-from aiobotocore.session import get_session
-from botocore.exceptions import ClientError
-import config
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 # from auth import User
 from datetime import datetime, timezone, timedelta
+
+
+from aiobotocore.session import get_session
+from botocore.exceptions import ClientError
+
+from custom_exceptions import UserSessionExpired, ChatSessionNotFoundError, UserChatNotAllowedError
+import config
 
 # --- AWS Client Setup ---
 # Use a single session for all AWS clients
@@ -148,6 +152,45 @@ async def update_chat_session_last_message(chat_id: str, timestamp: str, content
         )
     except Exception as e:
         print(f"Error updating chat session {chat_id}: {e}")
+        
+async def user_is_allowed_to_chat(chat_id: str, user_id: str) -> None:
+    """Verify the user is a participant of the given chat session.
+
+    Args:
+        chat_id: The chat session identifier.
+        user_id: The user attempting to interact with the chat.
+
+    Raises:
+        ChatSessionNotFoundError: If chat_id does not exist in DynamoDB.
+        UserChatNotAllowedError: If user_id is not listed as a participant.
+    """
+    chat_session = await get_chat_session(chat_id)
+    if chat_session is None:
+        raise ChatSessionNotFoundError(f"Chat session not found.")
+
+    participant_ids = [entry['S'] for entry in chat_session.get('user_ids', {}).get('L', [])]
+    if user_id not in participant_ids:
+        raise UserChatNotAllowedError("User is not a participant of this chat.")
+
+
+async def get_chat_session(chat_id: str) -> Optional[Dict[str, Any]]:
+    """Fetch a raw ChatSession item from DynamoDB.
+
+    Args:
+        chat_id: Partition key of the session to fetch.
+
+    Returns:
+        The raw DynamoDB item dict, or None if not found or on error.
+    """
+    try:
+        response = await dynamodb_client.get_item(
+            TableName=config.DYNAMODB_CHATS_TABLE,
+            Key={'chat_id': {'S': str(chat_id)}}
+        )
+    except Exception as e:
+        print(f"Error fetching chat session '{chat_id}': {e}")
+        return None
+    return response.get('Item')
 
 async def save_user_session(session_id:str, access_token: str):
     """
@@ -178,12 +221,30 @@ async def get_token_from_session(session_id: str) -> Optional[str]:
         )
         item = response.get('Item')
         if item:
+            check_ttl_session(item)
             return item.get('access_token', {}).get('S')
+        return None
+    except UserSessionExpired as e:
+        print("USER session was expired")
         return None
     except Exception as e:
         print(f"Error retrieving session: {e}")
         return None
-    
+
+def check_ttl_session(session_item: Dict[str, Any]) -> None:
+    """Raise UserSessionExpired if the session's TTL has passed.
+
+    Args:
+        session_item: Raw DynamoDB item dict containing the 'ttl' field.
+
+    Raises:
+        UserSessionExpired: If the stored TTL is earlier than the current time.
+    """
+    now = int(datetime.now(timezone.utc).timestamp())
+    session_ttl = int(session_item.get('ttl', {}).get('N', 0))
+    if session_ttl < now:
+        raise UserSessionExpired("Session has expired")
+
 async def save_user_profile(user_info: dict):
     """
     Saves/Updates user in WebSocketUsers table on login.
@@ -310,7 +371,7 @@ async def get_chat_history(chat_id: str, limit: int = 20) -> List[Dict]:
         print(f"Error fetching history: {e}")
         return []
 
-async def check_user_exists(user_id: str) -> bool:
+async def check_user_exists(user_id: str) -> Tuple[bool,dict]:
     """Checks if a user exists in the WebSocketUsers table."""
     try:
         response = await dynamodb_client.get_item(
@@ -324,7 +385,7 @@ async def check_user_exists(user_id: str) -> bool:
         return (exists, user)
     except Exception as e:
         print(f"Error checking user existence: {e}")
-        return False
+        return (False, None)
     
 async def add_chat_to_user_list(user_id: str, chat_id: str):
     """
@@ -369,20 +430,20 @@ async def create_new_chat_session(current_user_id: str, target_user_id: str, cur
                 'last_message_content': {'S': ''},
                 'last_message_timestamp': {'S': ''},
                 'user_ids': {'L': [{'S': current_user_id}, {'S': target_user_id}]},
-                # We add 'updated_at' so it doesn't break sorting if your UI relies on it, 
-                # but set it to now.
-                'updated_at': {'S': datetime.now(timezone.utc).isoformat()} 
-            }
+                'updated_at': {'S': datetime.now(timezone.utc).isoformat()}
+            },
+            ConditionExpression="attribute_not_exists(chat_id)"
         )
-        
-        # 3. Add to Current User's List
-        await add_chat_to_user_list(current_user_id, chat_id)
-        
-        # 4. Add to Target User's List
-        await add_chat_to_user_list(target_user_id, chat_id)
-        
-        return chat_id
-        
-    except Exception as e:
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
+            # Chat already exists between these users — that is a valid outcome.
+            return chat_id
         print(f"Error creating chat session: {e}")
         return None
+    except Exception as e:
+        print(f"Unexpected error creating chat session: {e}")
+        return None
+
+    await add_chat_to_user_list(current_user_id, chat_id)
+    await add_chat_to_user_list(target_user_id, chat_id)
+    return chat_id
